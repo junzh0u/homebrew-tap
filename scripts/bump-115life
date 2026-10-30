@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+"""Bump Casks/115life.rb to the newest 115生活 DMG that 115 has published.
+
+115 publishes no version feed for the macOS client, only versioned DMGs at
+predictable URLs that stay up after newer releases. So probe the versions
+that could come next (a few patches, minors and a major ahead, in case some
+are skipped), take the newest that exists, and repeat from there until
+nothing newer turns up. The new DMG must hold a 115生活.app of that version
+signed with 115's Developer ID before the cask is rewritten.
+
+Usage: bump-115life [CASK]   (default: Casks/115life.rb next to this script)
+
+Prints the new version, or nothing when the cask is current. In GitHub
+Actions it also writes version=<new> to $GITHUB_OUTPUT.
+"""
+
+import hashlib
+import os
+import plistlib
+import re
+import subprocess
+import sys
+import tempfile
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+URL = "https://down.115.com/client/115pc/mac/115Life_{}_arm64.dmg"
+APP = "115生活.app"
+TEAM_ID = "5QTX4F9G92"
+AHEAD = 4  # patches or minors probed past the next one, for skipped releases
+
+
+def parse(version):
+    return tuple(int(part) for part in version.split("."))
+
+
+def fmt(version):
+    return ".".join(str(part) for part in version)
+
+
+def candidates(current):
+    major, minor, patch = current
+    for p in range(patch + 1, patch + 1 + AHEAD):
+        yield major, minor, p
+    for m in range(minor + 1, minor + 1 + AHEAD):
+        for p in range(AHEAD):
+            yield major, m, p
+    for m in range(AHEAD):
+        for p in range(AHEAD):
+            yield major + 1, m, p
+
+
+def exists(version):
+    request = urllib.request.Request(URL.format(fmt(version)), method="HEAD")
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return response.status == 200
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return False
+        raise
+
+
+def newest(current):
+    found = current
+    while True:
+        newer = [v for v in candidates(found) if exists(v)]
+        if not newer:
+            return found
+        found = max(newer)
+
+
+def verify(dmg, version):
+    with tempfile.TemporaryDirectory() as mount:
+        subprocess.run(
+            ["hdiutil", "attach", "-quiet", "-nobrowse", "-readonly", "-mountpoint", mount, dmg],
+            check=True,
+        )
+        try:
+            app = Path(mount) / APP
+            with open(app / "Contents/Info.plist", "rb") as f:
+                shipped = plistlib.load(f)["CFBundleShortVersionString"]
+            if shipped != version:
+                sys.exit(f"{APP} in the {version} DMG reports version {shipped}")
+            subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
+            details = subprocess.run(
+                ["codesign", "-dv", str(app)], capture_output=True, text=True, check=True
+            ).stderr
+            if f"TeamIdentifier={TEAM_ID}" not in details.splitlines():
+                sys.exit(f"{APP} {version} is not signed by team {TEAM_ID}")
+        finally:
+            subprocess.run(["hdiutil", "detach", "-quiet", mount], check=True)
+
+
+def main():
+    cask = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).parent.parent / "Casks/115life.rb"
+    text = cask.read_text()
+    current = re.search(r'^  version "([\d.]+)"$', text, re.M).group(1)
+    # Probes that cannot see the current DMG would read every newer one as absent
+    if not exists(parse(current)):
+        sys.exit(f"Cannot see the current DMG: {URL.format(current)}")
+    latest = fmt(newest(parse(current)))
+    if latest == current:
+        return
+
+    with tempfile.TemporaryDirectory() as tmp:
+        dmg = os.path.join(tmp, "115Life.dmg")
+        urllib.request.urlretrieve(URL.format(latest), dmg)
+        digest = hashlib.sha256()
+        with open(dmg, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                digest.update(chunk)
+        sha256 = digest.hexdigest()
+        verify(dmg, latest)
+
+    text = re.sub(r'^  version "[\d.]+"$', f'  version "{latest}"', text, flags=re.M)
+    text = re.sub(r'^  sha256 "\w+"$', f'  sha256 "{sha256}"', text, flags=re.M)
+    cask.write_text(text)
+    print(latest)
+    if "GITHUB_OUTPUT" in os.environ:
+        with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+            f.write(f"version={latest}\n")
+
+
+if __name__ == "__main__":
+    main()

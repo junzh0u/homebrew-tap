@@ -13,7 +13,11 @@ brew install --cask junzh0u/tap/115life
 
 ## Updating a cask
 
-These apps update themselves after install, so a cask's version only sets what a fresh install starts from. To bump one, change `version`, then refresh the checksum and check the result:
+These apps update themselves after install, so a cask's version only sets what a fresh install starts from.
+
+`115life` bumps itself: 115 publishes no version feed, so a daily workflow ([`bump-115life.yml`](.github/workflows/bump-115life.yml)) runs [`scripts/bump-115life`](scripts/bump-115life), which probes the DMG URLs of the next likely versions, verifies the newest DMG's app version and 115's Developer ID signature, and commits the new `version` and `sha256`. It can miss a release that jumps further than it probes; bump that one by hand.
+
+To bump a cask by hand, change `version`, then refresh the checksum and check the result:
 
 ```sh
 brew fetch --cask junzh0u/tap/<cask>     # prints the new sha256 on mismatch
