@@ -26,6 +26,10 @@ jobs:
       - id: livecheck
         run: |
           brew livecheck --cask --json junzh0u/tap/rex > livecheck.json
+          cat livecheck.json
+          # An unreachable appcast still exits 0 with an error object, which
+          # would otherwise read as "not outdated" forever
+          jq -e '.[0].version.latest' livecheck.json > /dev/null
           jq -r '.[0].version | "latest=\(.latest)\noutdated=\(.outdated)"' livecheck.json >> "$GITHUB_OUTPUT"
 
       # bump-cask-pr downloads the new DMG for its sha256; the tapped copy is
