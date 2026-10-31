@@ -1,0 +1,43 @@
+name: Bump rex
+
+on:
+  schedule:
+    - cron: "37 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: macos-latest
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_ENV_HINTS: "1"
+    steps:
+      - uses: actions/checkout@v5
+
+      # Tap this checkout so brew reads the cask being bumped; Homebrew refuses
+      # casks from taps it hasn't been told to trust
+      - run: |
+          brew tap junzh0u/tap "$GITHUB_WORKSPACE"
+          brew trust --tap junzh0u/tap
+
+      - id: livecheck
+        run: |
+          brew livecheck --cask --json junzh0u/tap/rex > livecheck.json
+          jq -r '.[0].version | "latest=\(.latest)\noutdated=\(.outdated)"' livecheck.json >> "$GITHUB_OUTPUT"
+
+      # bump-cask-pr downloads the new DMG for its sha256; the tapped copy is
+      # edited, then copied back into the checkout to commit
+      - if: steps.livecheck.outputs.outdated == 'true'
+        run: |
+          brew bump-cask-pr --write-only --no-audit --no-style \
+            --version "${{ steps.livecheck.outputs.latest }}" junzh0u/tap/rex
+          brew audit --cask --strict --online junzh0u/tap/rex
+          cp "$(brew --repo junzh0u/tap)/Casks/rex.rb" Casks/rex.rb
+          brew style Casks/rex.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(rex): bump to ${{ steps.livecheck.outputs.latest }}" Casks/rex.rb
+          git push
