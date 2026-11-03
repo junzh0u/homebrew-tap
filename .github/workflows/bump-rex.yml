@@ -33,12 +33,14 @@ jobs:
           jq -r '.[0].version | "latest=\(.latest)\noutdated=\(.outdated)"' livecheck.json >> "$GITHUB_OUTPUT"
 
       # bump-cask-pr downloads the new DMG for its sha256; the tapped copy is
-      # edited, then copied back into the checkout to commit
+      # edited, then copied back into the checkout to commit. The token audit is
+      # skipped: homebrew/core's unrelated `rex` formula (rexify.org) only
+      # matters to a cask submitted to homebrew/cask
       - if: steps.livecheck.outputs.outdated == 'true'
         run: |
           brew bump-cask-pr --write-only --no-audit --no-style \
             --version "${{ steps.livecheck.outputs.latest }}" junzh0u/tap/rex
-          brew audit --cask --strict --online junzh0u/tap/rex
+          brew audit --cask --strict --online --except token_conflicts junzh0u/tap/rex
           cp "$(brew --repo junzh0u/tap)/Casks/rex.rb" Casks/rex.rb
           brew style Casks/rex.rb
           git config user.name "github-actions[bot]"
