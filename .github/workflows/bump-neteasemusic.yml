@@ -1,0 +1,56 @@
+name: Bump neteasemusic
+
+on:
+  schedule:
+    - cron: "57 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: macos-latest
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_ENV_HINTS: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+    steps:
+      - uses: actions/checkout@v5
+
+      # Tap this checkout so brew reads the cask being bumped; Homebrew refuses
+      # casks from taps it hasn't been told to trust
+      - run: |
+          brew tap junzh0u/tap "$GITHUB_WORKSPACE"
+          brew trust --tap junzh0u/tap
+
+      # stderr stays out of the JSON: the cask's deprecated preflight warns there
+      - id: livecheck
+        run: |
+          brew livecheck --cask --json junzh0u/tap/neteasemusic > livecheck.json
+          cat livecheck.json
+          # An unreachable API still exits 0 with an error object, which would
+          # otherwise read as "not outdated" forever
+          jq -e '.[0].version.latest' livecheck.json > /dev/null
+          jq -r '.[0].version | "latest=\(.latest)\noutdated=\(.outdated)"' livecheck.json >> "$GITHUB_OUTPUT"
+
+      # The audit unpacks the naked container without running the preflight
+      # that mounts the DMG, so its signing and rosetta checks find no app; an
+      # install into a scratch appdir runs the real path instead and checks
+      # NetEase's Developer ID. The token audit is skipped: the clash with
+      # homebrew/cask's neteasemusic is the point of this cask
+      - if: steps.livecheck.outputs.outdated == 'true'
+        run: |
+          brew bump-cask-pr --write-only --no-audit --no-style \
+            --version "${{ steps.livecheck.outputs.latest }}" junzh0u/tap/neteasemusic
+          brew audit --cask --strict --online --except token_conflicts,signing,rosetta junzh0u/tap/neteasemusic
+          brew install --cask --appdir="$RUNNER_TEMP/apps" junzh0u/tap/neteasemusic
+          app="$RUNNER_TEMP/apps/NeteaseMusic.app"
+          codesign --verify --deep --strict "$app"
+          codesign -dv "$app" 2>&1 | grep -x 'TeamIdentifier=43B53CMF9D'
+          cp "$(brew --repo junzh0u/tap)/Casks/neteasemusic.rb" Casks/neteasemusic.rb
+          brew style --except-cops Cask/InstallSteps Casks/neteasemusic.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(neteasemusic): bump to ${{ steps.livecheck.outputs.latest }}" Casks/neteasemusic.rb
+          git push
