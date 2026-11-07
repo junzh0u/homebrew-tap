@@ -1,0 +1,48 @@
+name: Bump flick
+
+on:
+  schedule:
+    - cron: "47 3 * * *"
+  # flick's release.sh dispatches this right after publishing a release
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: macos-latest
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_ENV_HINTS: "1"
+    steps:
+      - uses: actions/checkout@v5
+
+      # Tap this checkout so brew reads the cask being bumped; Homebrew refuses
+      # casks from taps it hasn't been told to trust
+      - run: |
+          brew tap junzh0u/tap "$GITHUB_WORKSPACE"
+          brew trust --tap junzh0u/tap
+
+      - id: livecheck
+        run: |
+          brew livecheck --cask --json junzh0u/tap/flick > livecheck.json
+          cat livecheck.json
+          # An unreachable release feed still exits 0 with an error object, which
+          # would otherwise read as "not outdated" forever
+          jq -e '.[0].version.latest' livecheck.json > /dev/null
+          jq -r '.[0].version | "latest=\(.latest)\noutdated=\(.outdated)"' livecheck.json >> "$GITHUB_OUTPUT"
+
+      # bump-cask-pr downloads the new zip for its sha256; the tapped copy is
+      # edited, then copied back into the checkout to commit
+      - if: steps.livecheck.outputs.outdated == 'true'
+        run: |
+          brew bump-cask-pr --write-only --no-audit --no-style \
+            --version "${{ steps.livecheck.outputs.latest }}" junzh0u/tap/flick
+          brew audit --cask --strict --online junzh0u/tap/flick
+          cp "$(brew --repo junzh0u/tap)/Casks/flick.rb" Casks/flick.rb
+          brew style Casks/flick.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(flick): bump to ${{ steps.livecheck.outputs.latest }}" Casks/flick.rb
+          git push
