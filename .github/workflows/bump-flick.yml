@@ -15,6 +15,9 @@ jobs:
     env:
       HOMEBREW_NO_AUTO_UPDATE: "1"
       HOMEBREW_NO_ENV_HINTS: "1"
+      # livecheck and the online audit query GitHub's API for the release;
+      # anonymous, they share the runner IP's 60-an-hour limit
+      HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v5
 
