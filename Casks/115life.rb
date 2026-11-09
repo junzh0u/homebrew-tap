@@ -1,6 +1,6 @@
 cask "115life" do
-  version "37.3.2"
-  sha256 "b9c72e04357f1bac0753f0dd162c9e751e9522987578eb864ebc51db01ca1fd1"
+  version "37.3.3"
+  sha256 "22fa2e39ae53eeb608e674dbd89d204b4b374037d2f8cd8ac7a0fd125d3f463e"
 
   url "https://down.115.com/client/115pc/mac/115Life_#{version}_arm64.dmg"
   name "115生活"
